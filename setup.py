@@ -14,8 +14,10 @@ exec(read('sanic_fcm/__meta__.py'), meta)
 if sys.argv[-1] == 'publish':
     os.system("rm dist/*.gz dist/*.whl")
     os.system("git tag -a %s -m 'v%s'" % (meta['__version__'], meta['__version__']))
-    os.system("python setup.py sdist bdist_wheel")
-    os.system("twine upload dist/*")
+    # os.system("python setup.py sdist bdist_wheel")
+    os.system("python setup.py sdist upload")
+    os.system("python setup.py bdist_wheel upload")
+    # os.system("twine upload dist/*")
     os.system("git push --tags")
     sys.exit()
 
