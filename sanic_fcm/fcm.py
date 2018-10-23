@@ -4,8 +4,11 @@ import asyncio
 import aiohttp
 import async_timeout
 
-from .errors import (FCMInvalidDataError, FCMAuthenticationError, FCMInternalPackageError,
-                     FCMServerError)
+from .errors import (FCMError, FCMAuthenticationError, FCMInvalidParameters, FCMMissingRegistration,
+                     FCMInvalidRegistration, FCMNotRegistered, FCMInvalidPackageName,
+                     FCMMismatchSenderId, FCMMessageTooBig, FCMInvalidDataKey, FCMInvalidTtl,
+                     FCMUnavailable, FCMInternalServerError, FCMDeviceMessageRateExceeded,
+                     FCMTopicsMessageRateExceeded, FCMInvalidApnsCredential)
 
 __all__ = ('FCM', 'FCMMessage')
 
@@ -35,7 +38,7 @@ class FCMMessage:
         :param **options: FCM options.
         """
         if not registration_ids:
-            raise FCMInvalidDataError("Empty registration_ids list")
+            raise FCMError("Empty registration_ids list")
         if not isinstance(registration_ids, (list, tuple)):
             registration_ids = list(registration_ids)
         if payload is None:
@@ -45,7 +48,7 @@ class FCMMessage:
             if isinstance(data, dict):
                 payload['data'] = data
             else:
-                raise FCMInvalidDataError("Provided data_message is in the wrong format")
+                raise FCMError("Provided data_message is in the wrong format")
 
         for opt, flt in self.OPTIONS.items():
             val = options.get(opt, None)
@@ -53,7 +56,7 @@ class FCMMessage:
                 try:
                     val = flt(val)
                 except ValueError:
-                    raise FCMInvalidDataError('Invalid type: %s' % opt)
+                    raise FCMInvalidParameters('Invalid type: %s' % opt)
             if val or isinstance(val, int):
                 payload[opt] = val
 
@@ -99,7 +102,7 @@ class FCM:
         """
         self.api_key = api_key
 
-    async def send(self, message: FCMMessage):
+    async def send(self, message: FCMMessage, strong=False):
         """Send message."""
         sleep_time = 1  # 1, 2, 4, 8, 16, 32, 64, 128, 526, 1024
         while True:
@@ -109,22 +112,42 @@ class FCM:
 
             else:
                 if response.status == 200:
-                    return self._parse_response(data)
+                    return self._parse_response(data, strong)
 
                 elif response.status == 401:
-                    raise FCMAuthenticationError(
-                        "There was an error authenticating the sender account")
+                    raise FCMAuthenticationError()
                 elif response.status == 400:
-                    raise FCMInternalPackageError(data)
+                    raise FCMInvalidParameters(data)
                 else:
                     sleep_time *= 2
                     if sleep_time > 128:
-                        raise FCMServerError("FCM server is temporarily unavailable")
+                        raise FCMUnavailable()
 
             await asyncio.sleep(sleep_time)
 
     @staticmethod
-    def _parse_response(data):
+    def _parse_error(data):
+        try:
+            err = {
+                'MissingRegistration': FCMMissingRegistration,
+                'InvalidRegistration': FCMInvalidRegistration,
+                'NotRegistered': FCMNotRegistered,
+                'InvalidPackageName': FCMInvalidPackageName,
+                'MismatchSenderId': FCMMismatchSenderId,
+                'MessageTooBig': FCMMessageTooBig,
+                'InvalidDataKey': FCMInvalidDataKey,
+                'InvalidTtl': FCMInvalidTtl,
+                'Unavailable': FCMUnavailable,
+                'InternalServerError': FCMInternalServerError,
+                'DeviceMessageRateExceeded': FCMDeviceMessageRateExceeded,
+                'TopicsMessageRateExceeded': FCMTopicsMessageRateExceeded,
+                'InvalidApnsCredential': FCMInvalidApnsCredential,
+            }[data['results'][0]['error']]
+            raise err(data)
+        except (KeyError, IndexError):
+            raise FCMError(data)
+
+    def _parse_response(self, data, strong):
         response_dict = {
             'multicast_ids': [],
             'success': 0,
@@ -134,9 +157,12 @@ class FCM:
             'topic_message_id': None
         }
         data = json.loads(data)
+
+        failure = data.get('failure', 0)
+        if strong and failure:
+            self._parse_error(data)
         multicast_id = data.get('multicast_id', None)
         success = data.get('success', 0)
-        failure = data.get('failure', 0)
         canonical_ids = data.get('canonical_ids', 0)
         results = data.get('results', [])
         message_id = data.get('message_id', None)  # for topic messages

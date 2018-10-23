@@ -21,7 +21,8 @@ async def send_fcm():
     pprint.pprint(msg.payload)
 
     fcm = FCM(apy_key)
-    x = await fcm.send(msg)
+    x = await fcm.send(msg, strong=True)
+    # sanic_fcm.errors.FCMInvalidRegistration: {'multicast_id': -1, 'success': 0, 'failure': 1, 'canonical_ids': 0, 'results': [{'error': 'InvalidRegistration'}]}
     print('x', x)
     # err = {'multicast_id': -1, 'success': 0, 'failure': 1, 'canonical_ids': 0, 'results': [{'error': 'InvalidRegistration'}]}
 
